@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Toolbar from './components/Toolbar';
@@ -30,18 +30,28 @@ const API_BASE = 'http://127.0.0.1:5000';
 
 export default function App() {
   const [folderPath, setFolderPath] = useState(null);
-  const [photos, setPhotos] = useState([]);
-  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  // photoNames: string[] — ordered file names (stable reference, only changes on folder load)
+  // photoMap: Map<string, object> — keyed by file_name (mutated in place, same reference)
+  // photoVersion: number — bumped when a photo is updated (triggers Grid re-check)
+  const [photoNames, setPhotoNames] = useState([]);
+  const [photoMap, setPhotoMap] = useState(() => new Map());
+  const [photoVersion, setPhotoVersion] = useState(0);
+  const [selectedFileName, setSelectedFileName] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [wsConnected, setWsConnected] = useState(false);
 
-  const wsRef = useRef(null);
+  const photoMapRef = useRef(photoMap);
+  photoMapRef.current = photoMap;
+
+  const selectedPhoto = selectedFileName ? photoMap.get(selectedFileName) : null;
 
   const handleFolderSelected = useCallback(async (path) => {
     setFolderPath(path);
-    setSelectedPhoto(null);
-    setPhotos([]);
+    setSelectedFileName(null);
+    setPhotoNames([]);
+    setPhotoMap(() => new Map());
+    setPhotoVersion(0);
     setProgress({ current: 0, total: 0 });
 
     try {
@@ -51,7 +61,12 @@ export default function App() {
         body: JSON.stringify({ folder_path: path }),
       });
       const data = await res.json();
-      setPhotos(data.photos || []);
+      const list = data.photos || [];
+      const names = list.map((p) => p.photo_metadata.file_info.file_name);
+      const map = new Map();
+      list.forEach((p) => map.set(p.photo_metadata.file_info.file_name, p));
+      setPhotoNames(names);
+      setPhotoMap(() => map);
     } catch (err) {
       console.error('Failed to load photos:', err);
     }
@@ -123,52 +138,45 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        setPhotos((prev) =>
-          prev.map((p) =>
-            p.photo_metadata.file_info.file_name === fileName
-              ? { ...p, photo_metadata: { ...p.photo_metadata, ...updates } }
-              : p
-          )
-        );
-        if (selectedPhoto?.photo_metadata?.file_info?.file_name === fileName) {
-          setSelectedPhoto((prev) => ({
-            ...prev,
-            photo_metadata: { ...prev.photo_metadata, ...updates },
-          }));
-        }
+        setPhotoMap((prev) => {
+          const next = new Map(prev);
+          const photo = next.get(fileName);
+          if (photo) {
+            next.set(fileName, {
+              ...photo,
+              photo_metadata: { ...photo.photo_metadata, ...updates },
+            });
+          }
+          return next;
+        });
+        setPhotoVersion((v) => v + 1);
       }
     } catch (err) {
       console.error('Update failed:', err);
     }
-  }, [folderPath, selectedPhoto]);
+  }, [folderPath]);
+
+  const handleSelectPhoto = useCallback((photo) => {
+    setSelectedFileName(photo?.photo_metadata?.file_info?.file_name || null);
+  }, []);
 
   // WebSocket message handlers
   const handleWsMessage = useCallback((data) => {
     switch (data.type) {
-      case 'photo_result':
-        setPhotos((prev) =>
-          prev.map((p) =>
-            p.photo_metadata.file_info.file_name === data.photo.photo_metadata.file_info.file_name
-              ? data.photo
-              : p
-          )
-        );
-        // Update selected photo if it's the one that was updated
-        setSelectedPhoto((prev) => {
-          if (prev?.photo_metadata?.file_info?.file_name === data.photo.photo_metadata.file_info.file_name) {
-            return data.photo;
-          }
-          return prev;
+      case 'photo_result': {
+        const fileName = data.photo.photo_metadata.file_info.file_name;
+        setPhotoMap((prev) => {
+          const next = new Map(prev);
+          next.set(fileName, data.photo);
+          return next;
         });
-        setProgress((prev) => ({
-          current: prev.current + 1,
-          total: prev.total,
-        }));
+        setPhotoVersion((v) => v + 1);
         break;
+      }
       case 'progress':
         setProgress((prev) => ({
-          current: data.current || prev.current,
-          total: data.total || prev.total,
+          current: data.current ?? prev.current,
+          total: data.total ?? prev.total,
         }));
         break;
       case 'complete':
@@ -184,6 +192,15 @@ export default function App() {
     }
   }, []);
 
+  // StatusBar needs counts — compute from photoMap efficiently
+  const statusCounts = useMemo(() => {
+    let detected = 0;
+    for (const p of photoMap.values()) {
+      if (p.photo_metadata?.status !== '未检测') detected++;
+    }
+    return { total: photoNames.length, detected, pending: photoNames.length - detected };
+  }, [photoNames.length, photoVersion]);
+
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
@@ -191,7 +208,6 @@ export default function App() {
         url={`ws://127.0.0.1:${window.FLASK_PORT || 5000}`}
         onMessage={handleWsMessage}
         onConnectionChange={setWsConnected}
-        ref={wsRef}
       />
       <div className="app-container">
         <Toolbar
@@ -203,9 +219,11 @@ export default function App() {
         <div className="main-content">
           <div className="photo-grid-area">
             <PhotoGrid
-              photos={photos}
-              selectedPhoto={selectedPhoto}
-              onSelectPhoto={setSelectedPhoto}
+              photoNames={photoNames}
+              photoMap={photoMap}
+              photoVersion={photoVersion}
+              selectedFileName={selectedFileName}
+              onSelectPhoto={handleSelectPhoto}
             />
           </div>
           <div className="detail-panel-area">
@@ -219,12 +237,11 @@ export default function App() {
         </div>
         <div className="status-bar-area">
           <StatusBar
-            progress={progress}
+            statusCounts={statusCounts}
             isProcessing={isProcessing}
             onStart={handleStartDetection}
             onCancel={handleCancelDetection}
             folderPath={folderPath}
-            photos={photos}
           />
         </div>
       </div>

@@ -12,7 +12,6 @@ const PhotoCard = React.memo(function PhotoCard({ photo, isSelected, onSelect, w
   const status = meta.status || '未检测';
   const qualities = meta.quality || [];
   const statusConf = getStatusConfig(status);
-  const isSelectedPhoto = isSelected?.photo_metadata?.file_info?.file_name === fileInfo.file_name;
 
   const thumbUrl = fileInfo.file_path
     ? `${API_BASE}/api/thumb/${encodeURIComponent(fileInfo.file_path)}`
@@ -26,11 +25,7 @@ const PhotoCard = React.memo(function PhotoCard({ photo, isSelected, onSelect, w
         borderRadius: '8px',
         overflow: 'hidden',
         cursor: 'pointer',
-        border: isSelectedPhoto ? '2px solid #90caf9' : '2px solid transparent',
-        transition: 'border-color 0.2s',
-        '&:hover': {
-          borderColor: '#666',
-        },
+        border: isSelected ? '2px solid #90caf9' : '2px solid transparent',
         bgcolor: '#2a2a2a',
         width: width || '100%',
         height: height || '100%',

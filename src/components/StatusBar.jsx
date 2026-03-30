@@ -6,11 +6,9 @@ import Typography from '@mui/material/Typography';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 
-export default function StatusBar({ progress, isProcessing, onStart, onCancel, folderPath, photos }) {
-  const totalPhotos = photos.length;
-  const detected = photos.filter((p) => p.photo_metadata?.status !== '未检测').length;
-  const pending = totalPhotos - detected;
-  const pct = totalPhotos > 0 ? (detected / totalPhotos) * 100 : 0;
+export default function StatusBar({ statusCounts, isProcessing, onStart, onCancel, folderPath }) {
+  const { total, detected, pending } = statusCounts;
+  const pct = total > 0 ? (detected / total) * 100 : 0;
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -18,7 +16,7 @@ export default function StatusBar({ progress, isProcessing, onStart, onCancel, f
       <Box sx={{ flexGrow: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
           <Typography variant="body2" sx={{ color: '#aaa' }}>
-            进度: {detected}/{totalPhotos}
+            进度: {detected}/{total}
           </Typography>
           <Typography variant="body2" sx={{ color: '#aaa' }}>
             待检测: {pending}
