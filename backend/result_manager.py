@@ -100,7 +100,7 @@ def ensure_thumbnails(folder_path, file_names):
 
 def init_photos(folder_path):
     """Initialize result.json with all photos in the folder.
-    Also generates thumbnails for new images.
+    Also ensures thumbnails exist for all images.
     Returns the full result data."""
     result = load_result_json(folder_path)
     existing_names = {
@@ -108,12 +108,10 @@ def init_photos(folder_path):
     }
 
     image_files = get_image_files(folder_path)
-    new_files = [f for f in image_files if f not in existing_names]
 
-    # Generate thumbnails for new images
-    if new_files:
-        logger.info(f"Generating thumbnails for {len(new_files)} new images...")
-        ensure_thumbnails(folder_path, new_files)
+    # Always ensure thumbnails exist (skips already generated ones)
+    logger.info(f"Ensuring thumbnails for {len(image_files)} images...")
+    ensure_thumbnails(folder_path, image_files)
 
     for fname in image_files:
         if fname not in existing_names:
