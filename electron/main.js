@@ -97,15 +97,18 @@ function createWindow() {
     },
   });
 
-  // In dev mode, load from webpack dev server
-  const devServerURL = 'http://localhost:3000';
-  mainWindow.loadURL(devServerURL);
+  // dev: load from webpack dev server; prod: load from dist/index.html
+  const isDev = !app.isPackaged;
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-  });
-
-  mainWindow.webContents.openDevTools() 
+  }); 
 }
 
 // IPC handlers

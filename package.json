@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"webpack serve --mode development\" \"wait-on http://localhost:3000 && electron .\"",
     "build": "webpack --mode production",
-    "start": "electron ."
+    "start": "webpack --mode production && electron ."
   },
   "dependencies": {
     "@emotion/react": "^11.11.4",
