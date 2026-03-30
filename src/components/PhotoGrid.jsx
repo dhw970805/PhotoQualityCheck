@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Grid } from 'react-window';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -8,14 +8,16 @@ const CARD_WIDTH = 200;
 const CARD_GAP = 8;
 
 const CellRenderer = React.memo(function CellRenderer({
-  columnIndex, rowIndex, style, photoNames, photoMap, selectedFileName, onSelectPhoto, columnCount, cardWidth, cardHeight,
+  columnIndex, rowIndex, style,
+  photoNames, photoMapRef, selectedFileName, onSelectPhoto,
+  columnCount, cardWidth, cardHeight,
 }) {
   const index = rowIndex * columnCount + columnIndex;
   if (index >= photoNames.length) {
     return <div style={style} />;
   }
   const fileName = photoNames[index];
-  const photo = photoMap.get(fileName);
+  const photo = photoMapRef.current.get(fileName);
   if (!photo) return <div style={style} />;
   const isSelected = selectedFileName === fileName;
   return (
@@ -34,6 +36,8 @@ const CellRenderer = React.memo(function CellRenderer({
 export default function PhotoGrid({ photoNames, photoMap, photoVersion, selectedFileName, onSelectPhoto }) {
   const containerRef = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const photoMapRef = useRef(photoMap);
+  photoMapRef.current = photoMap;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -51,7 +55,6 @@ export default function PhotoGrid({ photoNames, photoMap, photoVersion, selected
   const hasPhotos = photoNames.length > 0;
   const gridReady = hasPhotos && size.width > 0 && size.height > 0;
 
-  // Layout params — stable as long as container size doesn't change
   const { columnCount, cardWidth, cardHeight, rowCount } = useMemo(() => {
     if (!gridReady) return { columnCount: 0, cardWidth: 0, cardHeight: 0, rowCount: 0 };
     const cc = Math.max(1, Math.floor((size.width + CARD_GAP) / (CARD_WIDTH + CARD_GAP)));
@@ -60,17 +63,19 @@ export default function PhotoGrid({ photoNames, photoMap, photoVersion, selected
     return { columnCount: cc, cardWidth: cw, cardHeight: ch, rowCount: Math.ceil(photoNames.length / cc) };
   }, [gridReady, size.width, size.height, photoNames.length]);
 
-  // cellProps — only photoMap and photoVersion change when a photo updates,
-  // React.memo on CellRenderer handles per-cell skip
+  // photoVersion is a number — Object.values({photoVersion: 5}) = [5],
+  // so react-window's de() function correctly detects changes and refreshes cells.
+  // photoMapRef is a stable ref object — CellRenderer reads from .current at render time.
   const cellProps = useMemo(() => ({
     photoNames,
-    photoMap,
+    photoMapRef,
     selectedFileName,
     onSelectPhoto,
     columnCount,
     cardWidth,
     cardHeight,
-  }), [photoNames, photoMap, selectedFileName, onSelectPhoto, columnCount, cardWidth, cardHeight]);
+    photoVersion,
+  }), [photoNames, selectedFileName, onSelectPhoto, columnCount, cardWidth, cardHeight, photoVersion]);
 
   if (!hasPhotos) {
     return (
@@ -100,6 +105,7 @@ export default function PhotoGrid({ photoNames, photoMap, photoVersion, selected
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
       {gridReady && (
         <Grid
+          key={photoVersion}
           columnCount={columnCount}
           columnWidth={cardWidth}
           rowCount={rowCount}
