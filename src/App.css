@@ -1,0 +1,64 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background-color: #121212;
+  color: #e0e0e0;
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.main-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.photo-grid-area {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.detail-panel-area {
+  width: 360px;
+  min-width: 360px;
+  border-left: 1px solid #333;
+  overflow-y: auto;
+  background-color: #1E1E1E;
+}
+
+.status-bar-area {
+  border-top: 1px solid #333;
+  background-color: #1E1E1E;
+  padding: 12px 24px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
