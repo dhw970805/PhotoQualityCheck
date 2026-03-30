@@ -4,7 +4,7 @@ import sys
 import threading
 import traceback
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
@@ -168,14 +168,14 @@ def api_export():
 @app.route('/api/image/<path:filepath>')
 def api_serve_image(filepath):
     """Serve original image from any folder (used for detail panel preview)."""
-    # filepath is like "D:/photos/IMG001.JPG" or "D:\\photos\\IMG001.JPG"
     safe_path = os.path.normpath(filepath)
-    # Security: only allow absolute paths that exist
     if not os.path.isabs(safe_path) or not os.path.isfile(safe_path):
         return jsonify({'error': 'file not found'}), 404
     directory = os.path.dirname(safe_path)
     filename = os.path.basename(safe_path)
-    return send_from_directory(directory, filename)
+    resp = make_response(send_from_directory(directory, filename))
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 @app.route('/api/thumb/<path:filepath>')
@@ -191,10 +191,14 @@ def api_serve_thumbnail(filepath):
     thumb_path = os.path.join(thumb_dir, filename)
 
     if os.path.isfile(thumb_path):
-        return send_from_directory(thumb_dir, filename)
+        resp = make_response(send_from_directory(thumb_dir, filename))
+        resp.headers['Cache-Control'] = 'public, max-age=604800'
+        return resp
 
     # Fallback to original if thumbnail doesn't exist
-    return send_from_directory(directory, filename)
+    resp = make_response(send_from_directory(directory, filename))
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 # --- Analysis Pipeline ---

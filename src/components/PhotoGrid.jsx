@@ -7,11 +7,11 @@ import PhotoCard from './PhotoCard';
 const CARD_WIDTH = 200;
 const CARD_GAP = 8;
 
-const CellRenderer = React.memo(function CellRenderer({
-  columnIndex, rowIndex, style,
-  photoNames, photoMapRef, selectedFileName, onSelectPhoto,
-  columnCount, cardWidth, cardHeight,
-}) {
+// photoVersion is passed in cellProps to bust React.memo + react-window cache.
+// It's not destructured here but present in props for shallow comparison.
+const CellRenderer = React.memo(function CellRenderer(props) {
+  const { columnIndex, rowIndex, style, photoNames, photoMapRef,
+    selectedFileName, onSelectPhoto, columnCount, cardWidth, cardHeight } = props;
   const index = rowIndex * columnCount + columnIndex;
   if (index >= photoNames.length) {
     return <div style={style} />;
@@ -63,9 +63,9 @@ export default function PhotoGrid({ photoNames, photoMap, photoVersion, selected
     return { columnCount: cc, cardWidth: cw, cardHeight: ch, rowCount: Math.ceil(photoNames.length / cc) };
   }, [gridReady, size.width, size.height, photoNames.length]);
 
-  // photoVersion is a number — Object.values({photoVersion: 5}) = [5],
-  // so react-window's de() function correctly detects changes and refreshes cells.
-  // photoMapRef is a stable ref object — CellRenderer reads from .current at render time.
+  // photoVersion in cellProps triggers react-window's internal useMemo refresh.
+  // photoMapRef is stable — CellRenderer reads .current at render time.
+  // No key= on Grid — avoids full remount on every photo update.
   const cellProps = useMemo(() => ({
     photoNames,
     photoMapRef,
@@ -105,7 +105,6 @@ export default function PhotoGrid({ photoNames, photoMap, photoVersion, selected
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
       {gridReady && (
         <Grid
-          key={photoVersion}
           columnCount={columnCount}
           columnWidth={cardWidth}
           rowCount={rowCount}
