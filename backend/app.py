@@ -278,18 +278,20 @@ def process_one_photo(folder_path, file_name, file_path):
         return
 
     # Step 1: MediaPipe analysis
-    mp_result = analyze_image(file_path)
+    # mp_result = analyze_image(file_path)
+    # if(file_path.contains("testSmalleye")):
+    #     logger.info(f"MediaPipe result for {file_name}: {mp_result}")
 
-    if not mp_result['face_found']:
-        # No face detected -> mark as 需复核, skip LLM
-        logger.info(f"No face in {file_name}, marking as 需复核")
-        update_photo_result(folder_path, file_name, {
-            'status': '需复核',
-            'quality': ['需复核'],
-            'reason': '未检测到人脸，需要人工复核',
-        })
-        _emit_photo_update(folder_path, file_name)
-        return
+    # if not mp_result['face_found']:
+    #     # No face detected -> mark as 需复核, skip LLM
+    #     logger.info(f"No face in {file_name}, marking as 需复核")
+    #     update_photo_result(folder_path, file_name, {
+    #         'status': '需复核',
+    #         'quality': ['需复核'],
+    #         'reason': '未检测到人脸，需要人工复核',
+    #     })
+    #     _emit_photo_update(folder_path, file_name)
+    #     return
 
     # Step 2: LLM analysis
     llm_result = analyze_with_llm(file_path)
@@ -314,12 +316,12 @@ def process_one_photo(folder_path, file_name, file_path):
         status = '合格'
         quality = ['合格']
 
-    # If MediaPipe detected closed eyes but LLM didn't flag it, trust MediaPipe
-    if mp_result.get('eyes_closed') and not mp_result.get('smile_detected'):
-        if '闭眼' not in quality:
-            quality.append('闭眼')
-        if status == '合格':
-            status = '需复核'
+    # # If MediaPipe detected closed eyes but LLM didn't flag it, trust MediaPipe
+    # if mp_result.get('eyes_closed') and not mp_result.get('smile_detected'):
+    #     if '闭眼' not in quality:
+    #         quality.append('闭眼')
+    #     if status == '合格':
+    #         status = '需复核'
 
     detailed_analysis = llm_result.get('detailed_analysis', '')
 

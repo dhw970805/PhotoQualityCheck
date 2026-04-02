@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Toolbar from './components/Toolbar';
+import FilterBar from './components/FilterBar';
 import PhotoGrid from './components/PhotoGrid';
 import DetailPanel from './components/DetailPanel';
 import StatusBar from './components/StatusBar';
@@ -40,6 +41,7 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [wsConnected, setWsConnected] = useState(false);
+  const [filterTags, setFilterTags] = useState(new Set());
 
   const photoMapRef = useRef(photoMap);
   photoMapRef.current = photoMap;
@@ -100,6 +102,21 @@ export default function App() {
 
   const handleExport = useCallback(async () => {
     if (!folderPath) return;
+
+    // Check for photos that are "需复核" but not "合格"
+    let hasUnreviewed = false;
+    for (const p of photoMap.values()) {
+      const qualities = p.photo_metadata?.quality || [];
+      if (qualities.includes('需复核') && !qualities.includes('合格')) {
+        hasUnreviewed = true;
+        break;
+      }
+    }
+    if (hasUnreviewed) {
+      const proceed = window.confirm('仍有需复核照片（未通过）未被导出，是否继续？');
+      if (!proceed) return;
+    }
+
     try {
       const res = await fetch(`${API_BASE}/api/export`, {
         method: 'POST',
@@ -115,7 +132,7 @@ export default function App() {
     } catch (err) {
       console.error('Export failed:', err);
     }
-  }, [folderPath]);
+  }, [folderPath, photoMap]);
 
   const handleRetry = useCallback(async (fileName) => {
     try {
@@ -192,14 +209,25 @@ export default function App() {
     }
   }, []);
 
+  // Filter photoNames by selected quality tags
+  const filteredPhotoNames = useMemo(() => {
+    if (filterTags.size === 0) return photoNames;
+    return photoNames.filter((name) => {
+      const photo = photoMap.get(name);
+      if (!photo) return false;
+      const qualities = photo.photo_metadata?.quality || [];
+      return qualities.some((q) => filterTags.has(q));
+    });
+  }, [photoNames, photoMap, filterTags, photoVersion]);
+
   // StatusBar needs counts — compute from photoMap efficiently
   const statusCounts = useMemo(() => {
     let detected = 0;
     for (const p of photoMap.values()) {
       if (p.photo_metadata?.status !== '未检测') detected++;
     }
-    return { total: photoNames.length, detected, pending: photoNames.length - detected };
-  }, [photoNames.length, photoVersion]);
+    return { total: filteredPhotoNames.length, detected, pending: filteredPhotoNames.length - detected };
+  }, [filteredPhotoNames.length, photoVersion]);
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -216,10 +244,13 @@ export default function App() {
           onExport={handleExport}
           wsConnected={wsConnected}
         />
+        {folderPath && (
+          <FilterBar filterTags={filterTags} onFilterChange={setFilterTags} />
+        )}
         <div className="main-content">
           <div className="photo-grid-area">
             <PhotoGrid
-              photoNames={photoNames}
+              photoNames={filteredPhotoNames}
               photoMap={photoMap}
               photoVersion={photoVersion}
               selectedFileName={selectedFileName}

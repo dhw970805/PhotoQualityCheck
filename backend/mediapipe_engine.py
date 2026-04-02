@@ -16,7 +16,7 @@ def get_face_mesh():
         _face_mesh = mp_face_mesh.FaceMesh(
             max_num_faces=3,
             refine_landmarks=True,
-            min_detection_confidence=0.5,
+            min_detection_confidence=0.3,
             min_tracking_confidence=0.5,
         )
         logger.info("MediaPipe FaceMesh model loaded")
