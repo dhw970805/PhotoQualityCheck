@@ -255,6 +255,7 @@ export default function App() {
               photoVersion={photoVersion}
               selectedFileName={selectedFileName}
               onSelectPhoto={handleSelectPhoto}
+              onUpdateResult={handleUpdateResult}
             />
           </div>
           <div className="detail-panel-area">

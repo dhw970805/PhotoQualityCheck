@@ -305,9 +305,15 @@ def process_one_photo(folder_path, file_name, file_path):
     is_bad = llm_result.get('is_bad_photo', False)
     reasons = llm_result.get('reasons', [])
 
-    # Ensure reasons only contain valid quality tags
-    valid_qualities = {'闭眼', '表情差', '构图差', '欠曝', '过曝', '合格', '需复核'}
-    reasons = [r for r in reasons if r in valid_qualities]
+    # Map API tags to display tags
+    tag_map = {
+        'unnatural_expression': '表情差',
+        'blinking': '闭眼',
+        'poor_composition': '构图差',
+        'over_exposure': '过曝',
+        'under_exposure': '欠曝',
+    }
+    reasons = [tag_map[r] for r in reasons if r in tag_map]
 
     if is_bad:
         status = '需复核'
