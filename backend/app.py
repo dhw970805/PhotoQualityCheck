@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import os
 import sys
@@ -9,7 +10,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 
 # Ensure backend package imports work when run as `python app.py`
-from config import FLASK_HOST, FLASK_PORT, DEBUG, LOG_FILE, LOG_FORMAT, USE_MOCK_LLM, THUMBNAIL_SUBDIR, BATCH_SIZE
+from config import FLASK_HOST, FLASK_PORT, DEBUG, LOG_FILE, LOG_FORMAT, USE_MOCK_LLM, THUMBNAIL_SUBDIR, BATCH_SIZE, MAX_CONCURRENCY
 from result_manager import init_photos, load_result_json, update_photo_result
 from mediapipe_engine import analyze_image
 
@@ -45,6 +46,7 @@ socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
 # --- Pipeline State ---
 _pipeline_thread = None
 _cancel_event = threading.Event()
+_result_lock = threading.Lock()  # Protects result.json concurrent read/write
 
 
 # --- REST API Routes ---
@@ -206,7 +208,7 @@ def api_serve_thumbnail(filepath):
 # --- Analysis Pipeline ---
 
 def run_pipeline(folder_path):
-    """Main pipeline: process all undetected photos in batches."""
+    """Main pipeline: process all undetected photos concurrently."""
     global _cancel_event
 
     try:
@@ -217,42 +219,65 @@ def run_pipeline(folder_path):
         ]
 
         total = len(photos_to_process)
-        logger.info(f"Pipeline started: {total} photos to process from {folder_path}")
+        if total == 0:
+            socketio.emit('pipeline_complete', {'type': 'complete', 'processed': 0})
+            return
 
+        logger.info(f"Pipeline started: {total} photos to process (concurrency={MAX_CONCURRENCY}) from {folder_path}")
         socketio.emit('pipeline_progress', {'type': 'progress', 'current': 0, 'total': total})
 
-        # Build (file_name, file_path) list
+        # Build (file_name, file_path) list and split into batches
         photo_list = [
             (p['photo_metadata']['file_info']['file_name'], p['photo_metadata']['file_info']['file_path'])
             for p in photos_to_process
         ]
 
-        # Process in batches of BATCH_SIZE
-        processed = 0
+        batches = []
         for i in range(0, len(photo_list), BATCH_SIZE):
-            if _cancel_event.is_set():
-                logger.info("Pipeline cancelled by user")
-                socketio.emit('pipeline_error', {
-                    'type': 'error',
-                    'message': '检测已被用户取消',
-                })
-                break
-
             batch = photo_list[i:i + BATCH_SIZE]
-            batch_names = [fn for fn, _ in batch]
-            batch_paths = [fp for _, fp in batch]
+            batches.append(([fn for fn, _ in batch], [fp for _, fp in batch]))
 
-            try:
-                process_batch(folder_path, batch_names, batch_paths)
-            except Exception as e:
-                logger.error(f"Error processing batch starting at {batch_names[0]}: {e}")
-                traceback.print_exc()
+        # Thread-safe progress counter
+        progress_lock = threading.Lock()
+        processed_count = [0]
 
-            processed += len(batch)
-            socketio.emit('pipeline_progress', {'type': 'progress', 'current': processed, 'total': total})
+        def on_batch_done(batch_size):
+            with progress_lock:
+                processed_count[0] += batch_size
+                current = processed_count[0]
+            socketio.emit('pipeline_progress', {'type': 'progress', 'current': current, 'total': total})
 
-        socketio.emit('pipeline_complete', {'type': 'complete', 'processed': processed})
-        logger.info(f"Pipeline complete: {processed}/{total} photos processed")
+        # Submit batches to thread pool, process concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENCY) as executor:
+            future_to_size = {}
+            for batch_names, batch_paths in batches:
+                if _cancel_event.is_set():
+                    break
+                future = executor.submit(process_batch, folder_path, batch_names, batch_paths)
+                future_to_size[future] = len(batch_names)
+
+            for future in concurrent.futures.as_completed(future_to_size):
+                if _cancel_event.is_set():
+                    break
+                batch_size = future_to_size[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Batch error: {e}")
+                    traceback.print_exc()
+                on_batch_done(batch_size)
+
+        if _cancel_event.is_set():
+            logger.info("Pipeline cancelled by user")
+            socketio.emit('pipeline_error', {
+                'type': 'error',
+                'message': '检测已被用户取消',
+            })
+        else:
+            with progress_lock:
+                final = processed_count[0]
+            socketio.emit('pipeline_complete', {'type': 'complete', 'processed': final})
+            logger.info(f"Pipeline complete: {final}/{total} photos processed")
 
     except Exception as e:
         logger.error(f"Pipeline fatal error: {e}")
@@ -283,46 +308,50 @@ def process_single_photo(folder_path, file_name):
 
 def _apply_llm_result(folder_path, file_name, llm_result):
     """Apply a parsed LLM result to a photo's record and emit WebSocket update."""
-    is_bad = llm_result.get('is_bad_photo', False)
-    reasons = llm_result.get('reasons', [])
+    with _result_lock:
+        is_bad = llm_result.get('is_bad_photo', False)
+        reasons = llm_result.get('reasons', [])
 
-    tag_map = {
-        'unnatural_expression': '表情差',
-        'blinking': '闭眼',
-        'poor_composition': '构图差',
-        'over_exposure': '过曝',
-        'under_exposure': '欠曝',
-    }
-    reasons = [tag_map[r] for r in reasons if r in tag_map]
+        tag_map = {
+            'unnatural_expression': '表情差',
+            'blinking': '闭眼',
+            'poor_composition': '构图差',
+            'over_exposure': '过曝',
+            'under_exposure': '欠曝',
+        }
+        reasons = [tag_map[r] for r in reasons if r in tag_map]
 
-    if is_bad:
-        status = '需复核'
-        quality = reasons if reasons else ['需复核']
-    else:
-        status = '合格'
-        quality = ['合格']
+        if is_bad:
+            status = '需复核'
+            quality = reasons if reasons else ['需复核']
+        else:
+            status = '合格'
+            quality = ['合格']
 
-    detailed_analysis = llm_result.get('detailed_analysis', '')
+        detailed_analysis = llm_result.get('detailed_analysis', '')
 
-    updates = {
-        'status': status,
-        'quality': quality,
-        'scores': {
-            'expression': llm_result.get('expressionScore', 0),
-            'composition': llm_result.get('compositionScore', 0),
-            'exposure': llm_result.get('exposureScore', 0),
-        },
-        'advise': detailed_analysis,
-        'reason': '; '.join(reasons) if reasons else '',
-    }
+        updates = {
+            'status': status,
+            'quality': quality,
+            'scores': {
+                'expression': llm_result.get('expressionScore', 0),
+                'composition': llm_result.get('compositionScore', 0),
+                'exposure': llm_result.get('exposureScore', 0),
+            },
+            'advise': detailed_analysis,
+            'reason': '; '.join(reasons) if reasons else '',
+        }
 
-    update_photo_result(folder_path, file_name, updates)
-    logger.info(f"Processed {file_name}: status={status}, quality={quality}")
-    _emit_photo_update(folder_path, file_name)
+        update_photo_result(folder_path, file_name, updates)
+        logger.info(f"Processed {file_name}: status={status}, quality={quality}")
+        _emit_photo_update(folder_path, file_name)
 
 
 def process_batch(folder_path, file_names, file_paths):
     """Process a batch of photos through the LLM pipeline."""
+    if _cancel_event.is_set():
+        return
+
     # Filter to existing files
     valid = [(n, p) for n, p in zip(file_names, file_paths) if os.path.exists(p)]
     if not valid:
