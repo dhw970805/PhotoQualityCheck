@@ -9,15 +9,17 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 
 # Ensure backend package imports work when run as `python app.py`
-from config import FLASK_HOST, FLASK_PORT, DEBUG, LOG_FILE, LOG_FORMAT, USE_MOCK_LLM, THUMBNAIL_SUBDIR
+from config import FLASK_HOST, FLASK_PORT, DEBUG, LOG_FILE, LOG_FORMAT, USE_MOCK_LLM, THUMBNAIL_SUBDIR, BATCH_SIZE
 from result_manager import init_photos, load_result_json, update_photo_result
 from mediapipe_engine import analyze_image
 
 if USE_MOCK_LLM:
     from mock_llm_response import mock_analyze as analyze_with_llm
+    from mock_llm_response import mock_analyze_batch as analyze_batch_with_llm
     logger_info_mode = "Mock LLM (随机模拟)"
 else:
     from llm_client import analyze_with_llm
+    from llm_client import analyze_batch_with_llm
     logger_info_mode = "Qwen-3.5Plus (真实API)"
 from export_manager import export_photos
 
@@ -204,7 +206,7 @@ def api_serve_thumbnail(filepath):
 # --- Analysis Pipeline ---
 
 def run_pipeline(folder_path):
-    """Main pipeline: process all undetected photos."""
+    """Main pipeline: process all undetected photos in batches."""
     global _cancel_event
 
     try:
@@ -219,8 +221,15 @@ def run_pipeline(folder_path):
 
         socketio.emit('pipeline_progress', {'type': 'progress', 'current': 0, 'total': total})
 
+        # Build (file_name, file_path) list
+        photo_list = [
+            (p['photo_metadata']['file_info']['file_name'], p['photo_metadata']['file_info']['file_path'])
+            for p in photos_to_process
+        ]
+
+        # Process in batches of BATCH_SIZE
         processed = 0
-        for photo in photos_to_process:
+        for i in range(0, len(photo_list), BATCH_SIZE):
             if _cancel_event.is_set():
                 logger.info("Pipeline cancelled by user")
                 socketio.emit('pipeline_error', {
@@ -229,16 +238,17 @@ def run_pipeline(folder_path):
                 })
                 break
 
-            file_name = photo['photo_metadata']['file_info']['file_name']
-            file_path = photo['photo_metadata']['file_info']['file_path']
+            batch = photo_list[i:i + BATCH_SIZE]
+            batch_names = [fn for fn, _ in batch]
+            batch_paths = [fp for _, fp in batch]
 
             try:
-                process_one_photo(folder_path, file_name, file_path)
+                process_batch(folder_path, batch_names, batch_paths)
             except Exception as e:
-                logger.error(f"Error processing {file_name}: {e}")
+                logger.error(f"Error processing batch starting at {batch_names[0]}: {e}")
                 traceback.print_exc()
 
-            processed += 1
+            processed += len(batch)
             socketio.emit('pipeline_progress', {'type': 'progress', 'current': processed, 'total': total})
 
         socketio.emit('pipeline_complete', {'type': 'complete', 'processed': processed})
@@ -271,41 +281,11 @@ def process_single_photo(folder_path, file_name):
         socketio.emit('pipeline_error', {'type': 'error', 'message': str(e)})
 
 
-def process_one_photo(folder_path, file_name, file_path):
-    """Process a single photo through the pipeline."""
-    if not os.path.exists(file_path):
-        logger.warning(f"File not found: {file_path}")
-        return
-
-    # Step 1: MediaPipe analysis
-    # mp_result = analyze_image(file_path)
-    # if(file_path.contains("testSmalleye")):
-    #     logger.info(f"MediaPipe result for {file_name}: {mp_result}")
-
-    # if not mp_result['face_found']:
-    #     # No face detected -> mark as 需复核, skip LLM
-    #     logger.info(f"No face in {file_name}, marking as 需复核")
-    #     update_photo_result(folder_path, file_name, {
-    #         'status': '需复核',
-    #         'quality': ['需复核'],
-    #         'reason': '未检测到人脸，需要人工复核',
-    #     })
-    #     _emit_photo_update(folder_path, file_name)
-    #     return
-
-    # Step 2: LLM analysis
-    llm_result = analyze_with_llm(file_path)
-
-    if llm_result is None:
-        # LLM failed -> keep as 未检测, don't block pipeline
-        logger.warning(f"LLM failed for {file_name}, keeping as 未检测")
-        return
-
-    # Step 3: Aggregate results
+def _apply_llm_result(folder_path, file_name, llm_result):
+    """Apply a parsed LLM result to a photo's record and emit WebSocket update."""
     is_bad = llm_result.get('is_bad_photo', False)
     reasons = llm_result.get('reasons', [])
 
-    # Map API tags to display tags
     tag_map = {
         'unnatural_expression': '表情差',
         'blinking': '闭眼',
@@ -321,13 +301,6 @@ def process_one_photo(folder_path, file_name, file_path):
     else:
         status = '合格'
         quality = ['合格']
-
-    # # If MediaPipe detected closed eyes but LLM didn't flag it, trust MediaPipe
-    # if mp_result.get('eyes_closed') and not mp_result.get('smile_detected'):
-    #     if '闭眼' not in quality:
-    #         quality.append('闭眼')
-    #     if status == '合格':
-    #         status = '需复核'
 
     detailed_analysis = llm_result.get('detailed_analysis', '')
 
@@ -345,8 +318,41 @@ def process_one_photo(folder_path, file_name, file_path):
 
     update_photo_result(folder_path, file_name, updates)
     logger.info(f"Processed {file_name}: status={status}, quality={quality}")
-
     _emit_photo_update(folder_path, file_name)
+
+
+def process_batch(folder_path, file_names, file_paths):
+    """Process a batch of photos through the LLM pipeline."""
+    # Filter to existing files
+    valid = [(n, p) for n, p in zip(file_names, file_paths) if os.path.exists(p)]
+    if not valid:
+        return
+
+    valid_names = [n for n, p in valid]
+    valid_paths = [p for n, p in valid]
+
+    llm_results = analyze_batch_with_llm(valid_paths)
+
+    for name, result in zip(valid_names, llm_results):
+        if result is not None:
+            _apply_llm_result(folder_path, name, result)
+        else:
+            logger.warning(f"No LLM result for {name}, keeping as 未检测")
+
+
+def process_one_photo(folder_path, file_name, file_path):
+    """Process a single photo through the pipeline (used for retry)."""
+    if not os.path.exists(file_path):
+        logger.warning(f"File not found: {file_path}")
+        return
+
+    llm_result = analyze_with_llm(file_path)
+
+    if llm_result is None:
+        logger.warning(f"LLM failed for {file_name}, keeping as 未检测")
+        return
+
+    _apply_llm_result(folder_path, file_name, llm_result)
 
 
 def _emit_photo_update(folder_path, file_name):
