@@ -1,5 +1,5 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Grid } from 'react-window';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import { Grid, useGridRef } from 'react-window';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import PhotoCard from './PhotoCard';
@@ -33,8 +33,9 @@ const CellRenderer = React.memo(function CellRenderer(props) {
   );
 });
 
-export default function PhotoGrid({ photoNames, photoMap, photoVersion, selectedFileName, onSelectPhoto }) {
+export default function PhotoGrid({ photoNames, photoMap, photoVersion, selectedFileName, onSelectPhoto, onUpdateResult }) {
   const containerRef = useRef(null);
+  const gridRef = useGridRef();
   const [size, setSize] = useState({ width: 0, height: 0 });
   const photoMapRef = useRef(photoMap);
   photoMapRef.current = photoMap;
@@ -62,6 +63,64 @@ export default function PhotoGrid({ photoNames, photoMap, photoVersion, selected
     const ch = cw * (2 / 3);
     return { columnCount: cc, cardWidth: cw, cardHeight: ch, rowCount: Math.ceil(photoNames.length / cc) };
   }, [gridReady, size.width, size.height, photoNames.length]);
+
+  // Keyboard navigation: arrow keys to move selection, space to toggle 合格/需复核
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+      if (!photoNames.length || columnCount <= 0) return;
+
+      const currentIndex = selectedFileName ? photoNames.indexOf(selectedFileName) : -1;
+
+      let newIndex = -1;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        newIndex = currentIndex < 0 ? 0 : Math.min(currentIndex + columnCount, photoNames.length - 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        newIndex = currentIndex < 0 ? 0 : Math.max(currentIndex - columnCount, 0);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        newIndex = currentIndex < 0 ? 0 : Math.min(currentIndex + 1, photoNames.length - 1);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        newIndex = currentIndex < 0 ? 0 : Math.max(currentIndex - 1, 0);
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        if (currentIndex < 0 || !onUpdateResult) return;
+        const photo = photoMapRef.current.get(photoNames[currentIndex]);
+        if (!photo) return;
+        const meta = photo.photo_metadata;
+        const currentStatus = meta.status || '未检测';
+        const newStatus = currentStatus === '合格' ? '需复核' : '合格';
+        let newQuality = [...(meta.quality || [])];
+        if (newStatus === '合格') {
+          if (!newQuality.includes('合格')) newQuality.push('合格');
+        } else {
+          newQuality = newQuality.filter(q => q !== '合格');
+        }
+        onUpdateResult(meta.file_info.file_name, { status: newStatus, quality: newQuality });
+        return;
+      } else {
+        return;
+      }
+
+      if (newIndex >= 0) {
+        const photo = photoMapRef.current.get(photoNames[newIndex]);
+        if (photo) {
+          onSelectPhoto(photo);
+          const rowIndex = Math.floor(newIndex / columnCount);
+          const colIndex = newIndex % columnCount;
+          gridRef.current?.scrollToCell?.({ rowIndex, columnIndex: colIndex });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [photoNames, selectedFileName, columnCount, onSelectPhoto, onUpdateResult]);
 
   // photoVersion in cellProps triggers react-window's internal useMemo refresh.
   // photoMapRef is stable — CellRenderer reads .current at render time.
@@ -105,6 +164,7 @@ export default function PhotoGrid({ photoNames, photoMap, photoVersion, selected
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
       {gridReady && (
         <Grid
+          gridRef={gridRef}
           columnCount={columnCount}
           columnWidth={cardWidth}
           rowCount={rowCount}

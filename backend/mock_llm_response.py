@@ -142,3 +142,29 @@ def mock_analyze(image_path):
 
     logger.info(f"[Mock LLM] {filename}: is_bad={is_bad}, reasons={reasons}, scores=({expression_score},{composition_score},{exposure_score})")
     return result
+
+
+def mock_analyze_batch(image_paths):
+    """模拟批量大模型分析，对多张图片进行模拟分析。
+
+    Args:
+        image_paths: 图片路径列表。
+
+    Returns:
+        list[dict|None]: 与输入列表等长的结果列表，失败项为 None。
+    """
+    import os
+    filenames = [os.path.basename(p) for p in image_paths]
+
+    # 模拟单次批量网络延迟
+    delay = random.uniform(0.5, 2.0)
+    time.sleep(delay)
+
+    results = []
+    for i, image_path in enumerate(image_paths):
+        result = mock_analyze(image_path)
+        results.append(result)
+        logger.info(f"[Mock LLM Batch] [{i}] {filenames[i]}: is_bad={result['is_bad_photo']}")
+
+    logger.info(f"[Mock LLM Batch] Processed {len(results)}/{len(image_paths)} images in {delay:.2f}s")
+    return results

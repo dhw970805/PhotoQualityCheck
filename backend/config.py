@@ -24,6 +24,7 @@ EAR_THRESHOLD = 0.2
 
 # LLM image settings
 LLM_IMAGE_MAX_WIDTH = 512  # Max image width sent to LLM API (base64 data-uri has 10MB limit)
+BATCH_SIZE = 5  # Number of images to send to LLM in one batch
 
 # Thumbnail settings
 THUMBNAIL_WIDTH = 400
