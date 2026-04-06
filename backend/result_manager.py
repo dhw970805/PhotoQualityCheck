@@ -4,9 +4,25 @@ import os
 import logging
 from PIL import Image
 
-from config import IMAGE_EXTENSIONS, THUMBNAIL_WIDTH, THUMBNAIL_SUBDIR
+from config import IMAGE_EXTENSIONS, THUMBNAIL_WIDTH, THUMBNAIL_SUBDIR, RAW_EXTENSIONS
 
 logger = logging.getLogger(__name__)
+
+
+def open_image(file_path):
+    """Open an image file, handling RAW formats via rawpy. Returns PIL Image."""
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext in RAW_EXTENSIONS:
+        import rawpy
+        with rawpy.imread(file_path) as raw:
+            rgb = raw.postprocess()
+        img = Image.fromarray(rgb)
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        return img
+
+    return Image.open(file_path)
 
 
 def compute_file_hash(file_path):
@@ -63,7 +79,8 @@ def _generate_thumbnail(folder_path, file_name):
 
     try:
         os.makedirs(thumb_dir, exist_ok=True)
-        with Image.open(src_path) as img:
+        img = open_image(src_path)
+        try:
             # EXIF orientation
             try:
                 from PIL import ImageOps
@@ -71,15 +88,19 @@ def _generate_thumbnail(folder_path, file_name):
             except Exception:
                 pass
 
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+
             w, h = img.size
             if w <= THUMBNAIL_WIDTH:
-                # 原图比缩略图还小，直接复制
-                img.save(thumb_path, img.format or 'JPEG', quality=85)
+                img.save(thumb_path, format='JPEG', quality=85)
             else:
                 ratio = THUMBNAIL_WIDTH / w
                 new_h = int(h * ratio)
                 img = img.resize((THUMBNAIL_WIDTH, new_h), Image.LANCZOS)
-                img.save(thumb_path, img.format or 'JPEG', quality=85)
+                img.save(thumb_path, format='JPEG', quality=85)
+        finally:
+            img.close()
         return True
     except Exception as e:
         logger.warning(f"Failed to generate thumbnail for {file_name}: {e}")

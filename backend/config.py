@@ -32,7 +32,15 @@ THUMBNAIL_WIDTH = 400
 THUMBNAIL_SUBDIR = '.thumbnails'
 
 # Supported image extensions
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+IMAGE_EXTENSIONS = {
+    '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp',
+    '.cr2', '.cr3', '.nef', '.arw', '.dng', '.orf', '.rw2', '.raf',
+    '.pef', '.srw', '.raw', '.dcr', '.kdc', '.erf', '.mos', '.mrw',
+}
+RAW_EXTENSIONS = {
+    '.cr2', '.cr3', '.nef', '.arw', '.dng', '.orf', '.rw2', '.raf',
+    '.pef', '.srw', '.raw', '.dcr', '.kdc', '.erf', '.mos', '.mrw',
+}
 
 # Logging
 LOG_FILE = 'photo_quality_check.log'

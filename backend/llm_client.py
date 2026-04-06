@@ -139,7 +139,9 @@ exposureScore, expressionScore, compositionScore的分数范围为0-100分.
 def encode_image_base64(image_path):
     """Encode an image file to base64, resizing if necessary to stay under API limits."""
     try:
-        with Image.open(image_path) as img:
+        from result_manager import open_image
+        img = open_image(image_path)
+        try:
             try:
                 img = ImageOps.exif_transpose(img)
             except Exception:
@@ -157,6 +159,8 @@ def encode_image_base64(image_path):
             buf = io.BytesIO()
             img.save(buf, format='JPEG', quality=85)
             return base64.b64encode(buf.getvalue()).decode('utf-8')
+        finally:
+            img.close()
     except Exception as e:
         logger.error(f"Failed to encode image {image_path}: {e}")
         return None
