@@ -4,6 +4,9 @@ dist/
 __pycache__/
 *.log
 .electron-*/
+release/
+backend/dist/
+backend/build/
 .thumbnails/
 result.json
 .env

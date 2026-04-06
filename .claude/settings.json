@@ -5,7 +5,11 @@
       "Bash(npm install:*)",
       "Bash(node -e \"const rw = require\\(''react-window''\\); console.log\\(Object.keys\\(rw\\)\\)\")",
       "Bash(node -e \"const rw = require\\(''react-window''\\); console.log\\(typeof rw.Grid\\)\")",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python -c \"import mediapipe; import os; mp_modules_path = os.path.join\\(os.path.dirname\\(mediapipe.__file__\\), ''modules''\\); print\\(mp_modules_path\\); print\\([d for d in os.listdir\\(mp_modules_path\\) if os.path.isdir\\(os.path.join\\(mp_modules_path, d\\)\\)][:10]\\)\")",
+      "Bash(python -c \"import mediapipe; import os; mp_modules_path = os.path.join\\(os.path.dirname\\(mediapipe.__file__\\), ''modules''\\); for module in [''face_landmark'']: module_path = os.path.join\\(mp_modules_path, module\\); print\\(f''{module}:'', os.listdir\\(module_path\\)[:10]\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"import cv2; print\\(cv2.__file__\\); import os; print\\(''OpenCV DLLs:'', [d for d in os.listdir\\(os.path.dirname\\(cv2.__file__\\)\\) if d.endswith\\(''.dll''\\)][:5]\\)\")"
     ]
   }
 }

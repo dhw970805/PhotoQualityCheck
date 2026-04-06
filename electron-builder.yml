@@ -1,0 +1,43 @@
+appId: com.photoqualitycheck.app
+productName: PhotoQualityCheck
+copyright: Copyright (c) 2024
+
+directories:
+  output: release
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+
+extraResources:
+  - from: backend/dist/flask_server
+    to: flask_server
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PhotoQualityCheck
+  uninstallDisplayName: PhotoQualityCheck
+
+mac:
+  target:
+    - target: dmg
+  category: public.app-category.photography
+
+dmg:
+  title: "${productName} ${version}"
+  artifactName: "${productName}-${version}-mac.${ext}"
+  window:
+    width: 600
+    height: 400

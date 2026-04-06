@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "concurrently \"webpack serve --mode development\" \"wait-on http://localhost:3000 && electron .\"",
     "build": "webpack --mode production",
-    "start": "webpack --mode production && electron ."
+    "build:frontend": "webpack --mode production",
+    "build:backend": "cd backend && pyinstaller flask_server.spec --distpath dist --workpath build --clean",
+    "start": "webpack --mode production && electron .",
+    "pack:win": "npm run build:frontend && npm run build:backend && electron-builder --win",
+    "pack:mac": "npm run build:frontend && npm run build:backend && electron-builder --mac"
   },
   "dependencies": {
     "@emotion/react": "^11.11.4",
@@ -26,6 +30,7 @@
     "concurrently": "^8.2.2",
     "css-loader": "^7.1.2",
     "electron": "^30.0.9",
+    "electron-builder": "^24.13.3",
     "html-webpack-plugin": "^5.6.0",
     "style-loader": "^4.0.0",
     "wait-on": "^7.2.0",

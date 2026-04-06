@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const net = require('net');
@@ -43,27 +44,49 @@ function waitForPort(port, maxRetries = 30) {
 }
 
 async function startFlask() {
-  const candidates = findPython();
-  let pythonCmd = 'python';
+  if (app.isPackaged) {
+    // --- Packaged mode: use PyInstaller-built executable ---
+    const exeName = process.platform === 'win32' ? 'flask_server.exe' : 'flask_server';
+    const exePath = path.join(process.resourcesPath, 'flask_server', exeName);
 
-  // Try to find a working Python
-  for (const cmd of candidates) {
-    try {
-      const { execSync } = require('child_process');
-      execSync(`"${cmd}" --version`, { stdio: 'pipe' });
-      pythonCmd = cmd;
-      break;
-    } catch {
-      continue;
+    if (!fs.existsSync(exePath)) {
+      throw new Error(`Flask server not found at: ${exePath}`);
     }
-  }
 
-  const backendDir = path.join(__dirname, '..', 'backend');
-  flaskProcess = spawn(pythonCmd, ['app.py'], {
-    cwd: backendDir,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, FLASK_PORT: String(FLASK_PORT) },
-  });
+    const userDataDir = app.getPath('userData');
+
+    flaskProcess = spawn(exePath, [], {
+      cwd: userDataDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        FLASK_PORT: String(FLASK_PORT),
+        FLASK_LOG_DIR: userDataDir,
+      },
+    });
+  } else {
+    // --- Dev mode: find system Python and run app.py ---
+    const candidates = findPython();
+    let pythonCmd = 'python';
+
+    for (const cmd of candidates) {
+      try {
+        const { execSync } = require('child_process');
+        execSync(`"${cmd}" --version`, { stdio: 'pipe' });
+        pythonCmd = cmd;
+        break;
+      } catch {
+        continue;
+      }
+    }
+
+    const backendDir = path.join(__dirname, '..', 'backend');
+    flaskProcess = spawn(pythonCmd, ['app.py'], {
+      cwd: backendDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, FLASK_PORT: String(FLASK_PORT) },
+    });
+  }
 
   flaskProcess.stdout.on('data', (data) => {
     console.log(`[Flask] ${data}`);

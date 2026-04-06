@@ -43,5 +43,6 @@ RAW_EXTENSIONS = {
 }
 
 # Logging
-LOG_FILE = 'photo_quality_check.log'
+LOG_DIR = os.environ.get('FLASK_LOG_DIR', '.')
+LOG_FILE = os.path.join(LOG_DIR, 'photo_quality_check.log')
 LOG_FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
