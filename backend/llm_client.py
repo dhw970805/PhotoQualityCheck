@@ -142,7 +142,12 @@ def encode_image_base64(image_path):
         from result_manager import open_image
         img = open_image(image_path)
         try:
+            # EXIF orientation (for non-RAW images; RAW images already oriented by open_image)
             try:
+                from result_manager import _get_exif_orientation_from_image
+                exif_orient = _get_exif_orientation_from_image(img)
+                if exif_orient and exif_orient != 1:
+                    logger.info(f"[encode] {os.path.basename(image_path)}: exif_transpose orientation={exif_orient}")
                 img = ImageOps.exif_transpose(img)
             except Exception:
                 pass
@@ -197,7 +202,7 @@ def analyze_with_llm(image_path):
         'max_tokens': 500,
         'temperature': 0.8,
         'top_p': 0.9,
-        'enable_thinking': False,
+        'enable_thinking': True,
     }
 
     headers = {

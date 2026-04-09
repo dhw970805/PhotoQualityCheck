@@ -9,7 +9,7 @@ function buildThumbUrl(filePath) {
   const lastSlash = normalized.lastIndexOf('/');
   const dir = normalized.substring(0, lastSlash);
   const file = normalized.substring(lastSlash + 1);
-  return `file:///${dir}/.thumbnails/${file}`;
+  return `file:///${dir}/.thumbnails/${file}.jpg`;
 }
 
 const PhotoCard = React.memo(function PhotoCard({ photo, isSelected, onSelect, width, height }) {

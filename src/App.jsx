@@ -40,6 +40,7 @@ export default function App() {
   const [selectedFileName, setSelectedFileName] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [wsConnected, setWsConnected] = useState(false);
   const [filterTags, setFilterTags] = useState(new Set());
 
@@ -196,6 +197,9 @@ export default function App() {
           total: data.total ?? prev.total,
         }));
         break;
+      case 'import_progress':
+        setImportProgress({ current: data.current ?? 0, total: data.total ?? 0 });
+        break;
       case 'complete':
         setIsProcessing(false);
         setProgress((prev) => ({ ...prev, current: prev.total }));
@@ -274,6 +278,7 @@ export default function App() {
             onStart={handleStartDetection}
             onCancel={handleCancelDetection}
             folderPath={folderPath}
+            importProgress={importProgress}
           />
         </div>
       </div>

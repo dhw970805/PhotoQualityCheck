@@ -61,10 +61,15 @@ def api_load_photos():
         return jsonify({'error': '无效的文件夹路径'}), 400
 
     try:
-        result = init_photos(folder_path)
+        def on_import_progress(current, total):
+            socketio.emit('import_progress', {'type': 'import_progress', 'current': current, 'total': total})
+
+        result = init_photos(folder_path, on_progress=on_import_progress)
+        socketio.emit('import_progress', {'type': 'import_progress', 'current': 0, 'total': 0})
         return jsonify({'photos': result['photos']})
     except Exception as e:
         logger.error(f"Failed to load photos: {e}")
+        socketio.emit('import_progress', {'type': 'import_progress', 'current': 0, 'total': 0})
         return jsonify({'error': str(e)}), 500
 
 
@@ -192,10 +197,10 @@ def api_serve_thumbnail(filepath):
     directory = os.path.dirname(safe_path)
     filename = os.path.basename(safe_path)
     thumb_dir = os.path.join(directory, THUMBNAIL_SUBDIR)
-    thumb_path = os.path.join(thumb_dir, filename)
+    thumb_path = os.path.join(thumb_dir, filename + '.jpg')
 
     if os.path.isfile(thumb_path):
-        resp = make_response(send_from_directory(thumb_dir, filename))
+        resp = make_response(send_from_directory(thumb_dir, filename + '.jpg'))
         resp.headers['Cache-Control'] = 'public, max-age=604800'
         return resp
 

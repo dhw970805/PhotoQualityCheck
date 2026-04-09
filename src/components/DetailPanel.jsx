@@ -83,7 +83,7 @@ export default function DetailPanel({ photo, onUpdateResult, onRetry, isProcessi
 
   const API_BASE = 'http://127.0.0.1:5000';
   const imgUrl = fileInfo.file_path
-    ? `${API_BASE}/api/image/${encodeURIComponent(fileInfo.file_path)}`
+    ? `${API_BASE}/api/thumb/${encodeURIComponent(fileInfo.file_path)}`
     : '';
 
   return (

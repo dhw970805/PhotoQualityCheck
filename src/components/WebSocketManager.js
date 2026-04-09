@@ -69,6 +69,10 @@ const WebSocketManager = forwardRef(({ url, onMessage, onConnectionChange }, ref
       onMessageRef.current?.(data);
     });
 
+    socket.on('import_progress', (data) => {
+      onMessageRef.current?.(data);
+    });
+
     socket.on('pipeline_complete', (data) => {
       onMessageRef.current?.(data);
     });

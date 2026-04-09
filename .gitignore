@@ -11,3 +11,4 @@ backend/build/
 result.json
 .env
 uploads/
+backend/exiftool-13.54_64/
