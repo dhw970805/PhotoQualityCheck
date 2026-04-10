@@ -12,6 +12,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import LinearProgress from '@mui/material/LinearProgress';
 import { getStatusConfig, getQualityConfig, STATUS_OPTIONS, QUALITY_OPTIONS } from '../utils/statusConfig';
+import { getThumbUrl } from '../services/api';
 
 function ScoreBar({ label, value }) {
   const color =
@@ -81,10 +82,7 @@ export default function DetailPanel({ photo, onUpdateResult, onRetry, isProcessi
     setEditing(false);
   };
 
-  const API_BASE = 'http://127.0.0.1:5000';
-  const imgUrl = fileInfo.file_path
-    ? `${API_BASE}/api/thumb/${encodeURIComponent(fileInfo.file_path)}`
-    : '';
+  const imgUrl = getThumbUrl(fileInfo.file_path);
 
   return (
     <Box sx={{ p: 2 }}>

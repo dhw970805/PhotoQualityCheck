@@ -14,12 +14,12 @@ QWEN_API_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completio
 QWEN_MODEL = 'qwen3.5-plus'
 QWEN_TIMEOUT = 120  # seconds
 
-# MediaPipe settings
+# MediaPipe settings (currently unused — mediapipe_engine.py is not active in pipeline)
 MEDIAPIPE_MODEL_COMPLEXITY = 1
 MEDIAPIPE_MIN_DETECTION_CONFIDENCE = 0.5
 MEDIAPIPE_MIN_TRACKING_CONFIDENCE = 0.5
 
-# Eye Aspect Ratio threshold for closed eyes
+# Eye Aspect Ratio threshold for closed eyes (currently unused)
 EAR_THRESHOLD = 0.2
 
 # LLM image settings

@@ -1,16 +1,7 @@
 import React from 'react';
 import Box from '@mui/material/Box';
 import { getStatusConfig, getQualityConfig } from '../utils/statusConfig';
-
-function buildThumbUrl(filePath) {
-  if (!filePath) return '';
-  // filePath: "D:\photos\IMG001.JPG" → "file:///D:/photos/.thumbnails/IMG001.JPG"
-  const normalized = filePath.replace(/\\/g, '/');
-  const lastSlash = normalized.lastIndexOf('/');
-  const dir = normalized.substring(0, lastSlash);
-  const file = normalized.substring(lastSlash + 1);
-  return `file:///${dir}/.thumbnails/${file}.jpg`;
-}
+import { buildFileThumbUrl } from '../services/api';
 
 const PhotoCard = React.memo(function PhotoCard({ photo, isSelected, onSelect, width, height }) {
   const meta = photo?.photo_metadata;
@@ -21,7 +12,7 @@ const PhotoCard = React.memo(function PhotoCard({ photo, isSelected, onSelect, w
   const qualities = meta.quality || [];
   const statusConf = getStatusConfig(status);
 
-  const thumbUrl = buildThumbUrl(fileInfo.file_path);
+  const thumbUrl = buildFileThumbUrl(fileInfo.file_path);
 
   return (
     <Box

@@ -1,19 +1,18 @@
-import concurrent.futures
 import logging
 import os
 import sys
 import threading
-import traceback
 
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
-# Ensure backend package imports work when run as `python app.py`
-from config import FLASK_HOST, FLASK_PORT, DEBUG, LOG_FILE, LOG_FORMAT, USE_MOCK_LLM, THUMBNAIL_SUBDIR, BATCH_SIZE, MAX_CONCURRENCY
-from result_manager import init_photos, load_result_json, update_photo_result
-from mediapipe_engine import analyze_image
+from config import FLASK_HOST, FLASK_PORT, DEBUG, LOG_FILE, LOG_FORMAT, USE_MOCK_LLM, THUMBNAIL_SUBDIR
+from result_manager import init_photos, update_photo_result
+from export_manager import export_photos
+import pipeline
 
+# --- LLM backend selection ---
 if USE_MOCK_LLM:
     from mock_llm_response import mock_analyze as analyze_with_llm
     from mock_llm_response import mock_analyze_batch as analyze_batch_with_llm
@@ -22,10 +21,6 @@ else:
     from llm_client import analyze_with_llm
     from llm_client import analyze_batch_with_llm
     logger_info_mode = "Qwen-3.5Plus (真实API)"
-from export_manager import export_photos
-
-# Chroma DB placeholder (not implemented per spec)
-# from .chroma_store import ChromaStore
 
 # --- Logging setup ---
 logging.basicConfig(
@@ -43,10 +38,11 @@ app = Flask(__name__)
 CORS(app, resources={r'/api/*': {'origins': '*'}})
 socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
 
-# --- Pipeline State ---
+# Initialize pipeline module with socketio instance
+pipeline.init(socketio)
+
+# --- Pipeline thread ---
 _pipeline_thread = None
-_cancel_event = threading.Event()
-_result_lock = threading.Lock()  # Protects result.json concurrent read/write
 
 
 # --- REST API Routes ---
@@ -76,7 +72,7 @@ def api_load_photos():
 @app.route('/api/start', methods=['POST'])
 def api_start_detection():
     """Start the photo analysis pipeline."""
-    global _pipeline_thread, _cancel_event
+    global _pipeline_thread
 
     data = request.get_json()
     folder_path = data.get('folder_path', '')
@@ -87,10 +83,10 @@ def api_start_detection():
     if _pipeline_thread and _pipeline_thread.is_alive():
         return jsonify({'error': '检测正在进行中'}), 409
 
-    _cancel_event.clear()
+    pipeline.cancel()
     _pipeline_thread = threading.Thread(
-        target=run_pipeline,
-        args=(folder_path,),
+        target=pipeline.run_pipeline,
+        args=(folder_path, analyze_batch_with_llm),
         daemon=True,
     )
     _pipeline_thread.start()
@@ -101,8 +97,7 @@ def api_start_detection():
 @app.route('/api/cancel', methods=['POST'])
 def api_cancel_detection():
     """Cancel the running pipeline."""
-    global _cancel_event
-    _cancel_event.set()
+    pipeline.cancel()
     return jsonify({'status': 'cancelled'})
 
 
@@ -124,10 +119,9 @@ def api_retry_photo(filename):
             'scores': {'expression': 0, 'composition': 0, 'exposure': 0},
         })
 
-        # Process this single photo in a background thread
         t = threading.Thread(
-            target=process_single_photo,
-            args=(folder_path, filename),
+            target=pipeline.process_single_photo,
+            args=(folder_path, filename, analyze_with_llm),
             daemon=True,
         )
         t.start()
@@ -210,200 +204,9 @@ def api_serve_thumbnail(filepath):
     return resp
 
 
-# --- Analysis Pipeline ---
-
-def run_pipeline(folder_path):
-    """Main pipeline: process all undetected photos concurrently."""
-    global _cancel_event
-
-    try:
-        result = load_result_json(folder_path)
-        photos_to_process = [
-            p for p in result['photos']
-            if p['photo_metadata']['status'] == '未检测'
-        ]
-
-        total = len(photos_to_process)
-        if total == 0:
-            socketio.emit('pipeline_complete', {'type': 'complete', 'processed': 0})
-            return
-
-        logger.info(f"Pipeline started: {total} photos to process (concurrency={MAX_CONCURRENCY}) from {folder_path}")
-        socketio.emit('pipeline_progress', {'type': 'progress', 'current': 0, 'total': total})
-
-        # Build (file_name, file_path) list and split into batches
-        photo_list = [
-            (p['photo_metadata']['file_info']['file_name'], p['photo_metadata']['file_info']['file_path'])
-            for p in photos_to_process
-        ]
-
-        batches = []
-        for i in range(0, len(photo_list), BATCH_SIZE):
-            batch = photo_list[i:i + BATCH_SIZE]
-            batches.append(([fn for fn, _ in batch], [fp for _, fp in batch]))
-
-        # Thread-safe progress counter
-        progress_lock = threading.Lock()
-        processed_count = [0]
-
-        def on_batch_done(batch_size):
-            with progress_lock:
-                processed_count[0] += batch_size
-                current = processed_count[0]
-            socketio.emit('pipeline_progress', {'type': 'progress', 'current': current, 'total': total})
-
-        # Submit batches to thread pool, process concurrently
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENCY) as executor:
-            future_to_size = {}
-            for batch_names, batch_paths in batches:
-                if _cancel_event.is_set():
-                    break
-                future = executor.submit(process_batch, folder_path, batch_names, batch_paths)
-                future_to_size[future] = len(batch_names)
-
-            for future in concurrent.futures.as_completed(future_to_size):
-                if _cancel_event.is_set():
-                    break
-                batch_size = future_to_size[future]
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"Batch error: {e}")
-                    traceback.print_exc()
-                on_batch_done(batch_size)
-
-        if _cancel_event.is_set():
-            logger.info("Pipeline cancelled by user")
-            socketio.emit('pipeline_error', {
-                'type': 'error',
-                'message': '检测已被用户取消',
-            })
-        else:
-            with progress_lock:
-                final = processed_count[0]
-            socketio.emit('pipeline_complete', {'type': 'complete', 'processed': final})
-            logger.info(f"Pipeline complete: {final}/{total} photos processed")
-
-    except Exception as e:
-        logger.error(f"Pipeline fatal error: {e}")
-        traceback.print_exc()
-        socketio.emit('pipeline_error', {'type': 'error', 'message': str(e)})
-
-
-def process_single_photo(folder_path, file_name):
-    """Process a single photo (for retry)."""
-    result = load_result_json(folder_path)
-    file_path = None
-    for p in result['photos']:
-        if p['photo_metadata']['file_info']['file_name'] == file_name:
-            file_path = p['photo_metadata']['file_info']['file_path']
-            break
-
-    if not file_path:
-        logger.error(f"Photo not found: {file_name}")
-        return
-
-    try:
-        process_one_photo(folder_path, file_name, file_path)
-        socketio.emit('pipeline_complete', {'type': 'complete', 'processed': 1})
-    except Exception as e:
-        logger.error(f"Retry error for {file_name}: {e}")
-        socketio.emit('pipeline_error', {'type': 'error', 'message': str(e)})
-
-
-def _apply_llm_result(folder_path, file_name, llm_result):
-    """Apply a parsed LLM result to a photo's record and emit WebSocket update."""
-    with _result_lock:
-        is_bad = llm_result.get('is_bad_photo', False)
-        reasons = llm_result.get('reasons', [])
-
-        tag_map = {
-            'unnatural_expression': '表情差',
-            'blinking': '闭眼',
-            'poor_composition': '构图差',
-            'over_exposure': '过曝',
-            'under_exposure': '欠曝',
-        }
-        reasons = [tag_map[r] for r in reasons if r in tag_map]
-
-        if is_bad:
-            status = '需复核'
-            quality = reasons if reasons else ['需复核']
-        else:
-            status = '合格'
-            quality = ['合格']
-
-        detailed_analysis = llm_result.get('detailed_analysis', '')
-
-        updates = {
-            'status': status,
-            'quality': quality,
-            'scores': {
-                'expression': llm_result.get('expressionScore', 0),
-                'composition': llm_result.get('compositionScore', 0),
-                'exposure': llm_result.get('exposureScore', 0),
-            },
-            'advise': detailed_analysis,
-            'reason': '; '.join(reasons) if reasons else '',
-        }
-
-        update_photo_result(folder_path, file_name, updates)
-        logger.info(f"Processed {file_name}: status={status}, quality={quality}")
-        _emit_photo_update(folder_path, file_name)
-
-
-def process_batch(folder_path, file_names, file_paths):
-    """Process a batch of photos through the LLM pipeline."""
-    if _cancel_event.is_set():
-        return
-
-    # Filter to existing files
-    valid = [(n, p) for n, p in zip(file_names, file_paths) if os.path.exists(p)]
-    if not valid:
-        return
-
-    valid_names = [n for n, p in valid]
-    valid_paths = [p for n, p in valid]
-
-    llm_results = analyze_batch_with_llm(valid_paths)
-
-    for name, result in zip(valid_names, llm_results):
-        if result is not None:
-            _apply_llm_result(folder_path, name, result)
-        else:
-            logger.warning(f"No LLM result for {name}, keeping as 未检测")
-
-
-def process_one_photo(folder_path, file_name, file_path):
-    """Process a single photo through the pipeline (used for retry)."""
-    if not os.path.exists(file_path):
-        logger.warning(f"File not found: {file_path}")
-        return
-
-    llm_result = analyze_with_llm(file_path)
-
-    if llm_result is None:
-        logger.warning(f"LLM failed for {file_name}, keeping as 未检测")
-        return
-
-    _apply_llm_result(folder_path, file_name, llm_result)
-
-
-def _emit_photo_update(folder_path, file_name):
-    """Read the latest result for a photo and emit via WebSocket."""
-    result = load_result_json(folder_path)
-    for photo in result['photos']:
-        if photo['photo_metadata']['file_info']['file_name'] == file_name:
-            # Add folder path for frontend thumbnail rendering
-            photo_with_path = dict(photo)
-            photo_with_path['_folderPath'] = folder_path
-            socketio.emit('photo_update', {'type': 'photo_result', 'photo': photo_with_path})
-            break
-
-
 # --- Run ---
 def main():
-    logger.info(f"Starting Flask server on {FLASK_HOST}:{FLASK_PORT}")
+    logger.info(f"Starting Flask server on {FLASK_HOST}:{FLASK_PORT} (LLM: {logger_info_mode})")
     socketio.run(app, host=FLASK_HOST, port=FLASK_PORT, debug=DEBUG, allow_unsafe_werkzeug=True)
 
 
